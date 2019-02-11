@@ -5,11 +5,8 @@ import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.X500NameBuilder;
 import org.bouncycastle.asn1.x500.style.BCStyle;
-import org.bouncycastle.asn1.x509.BasicConstraints;
-import org.bouncycastle.asn1.x509.Extension;
-import org.bouncycastle.asn1.x509.KeyUsage;
-import org.bouncycastle.cert.CertIOException;
-import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.asn1.x509.*;
+import org.bouncycastle.cert.*;
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
 import org.bouncycastle.cert.jcajce.JcaX509v1CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
@@ -102,7 +99,7 @@ public class Utils {
      * @param extensionOID
      * @return
      */
-    public static byte[] extractExtensionValue(X509Certificate certificate, ASN1ObjectIdentifier extensionOID) throws NoSuchAlgorithmException {
+    public static byte[] extractExtensionValue(X509Certificate certificate, ASN1ObjectIdentifier extensionOID) {
         byte[] octString = certificate.getExtensionValue(extensionOID.getId());
         if (octString == null) {
             return null;
@@ -149,6 +146,133 @@ public class Utils {
                 .setProvider(new BouncyCastleProvider())
                 .build(signerKey);
         return certBuilder.build(contentSigner);
+    }
+
+    /**
+     * Create a general end-entity certificate for use in verifying digital signatures.
+     * 创建用于验证数字签名的通用终端实体证书。
+     *
+     * @param signerCert certificate carrying the public key that will later be used to verify this certificate's signature.
+     * @param signerKey  private key used to generate the signature in the certificate.
+     * @param signAlg    the signature algorithm to sign the certificate with
+     * @param certKey    public key to be installed in the certificate.
+     * @return an X509CertificateHolder containing the V3 certificate
+     * @throws CertIOException
+     * @throws OperatorCreationException
+     * @throws NoSuchAlgorithmException
+     */
+    public static X509CertificateHolder createEndEntity(X509CertificateHolder signerCert, PrivateKey signerKey,
+                                                        String signAlg, PublicKey certKey) throws CertIOException,
+            OperatorCreationException, NoSuchAlgorithmException {
+        X500NameBuilder x500NameBld = new X500NameBuilder(BCStyle.INSTANCE)
+                .addRDN(BCStyle.CN, "Demo End-Entity Certificate")
+                .addRDN(BCStyle.C, "CN")
+                .addRDN(BCStyle.ST, "Shanghai")
+                .addRDN(BCStyle.L, "shanghai")
+                .addRDN(BCStyle.O, "Trustasia");
+
+        X500Name subject = x500NameBld.build();
+
+        JcaX509v3CertificateBuilder certBldr = new JcaX509v3CertificateBuilder(signerCert.getSubject(),
+                calculateSerialNumber(), calculateDate(0), calculateDate(24 * 31),
+                subject, certKey);
+
+        JcaX509ExtensionUtils extUtils = new JcaX509ExtensionUtils();
+
+        certBldr.addExtension(Extension.authorityKeyIdentifier, false,
+                extUtils.createAuthorityKeyIdentifier(signerCert))
+                .addExtension(Extension.subjectKeyIdentifier, false, extUtils.createSubjectKeyIdentifier(certKey))
+                .addExtension(Extension.basicConstraints, true, new BasicConstraints(false))
+                .addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
+        ContentSigner contentSigner = new JcaContentSignerBuilder(signAlg)
+                .setProvider(new BouncyCastleProvider())
+                .build(signerKey);
+
+        return certBldr.build(contentSigner);
+
+    }
+
+    /**
+     * Create a special purpose end entity cert which is associated with a particular key purpose.
+     * 创建与特定关键用途相关联的特殊用途的最终实体证书。
+     *
+     * @param signerCert certificate carrying the public key that will later be used to verify this certificate's signature
+     * @param signerKey  private key used to generate the signature in the certificate.
+     * @param signAlg    the signature algorithm to sign the certificate with
+     * @param certKey    public key to be installed in the certificate.
+     * @param keyPurpose the specific KeyPurposeId to associate with this certificate's public key.
+     * @return an X509CertificateHolder containing the V3 certificate.
+     * @throws OperatorCreationException
+     * @throws NoSuchAlgorithmException
+     * @throws CertIOException
+     */
+    public static X509CertificateHolder createSpecialPurposeEndEntity(X509CertificateHolder signerCert,
+                                                                      PrivateKey signerKey, String signAlg,
+                                                                      PublicKey certKey, KeyPurposeId keyPurpose)
+            throws OperatorCreationException, NoSuchAlgorithmException, CertIOException {
+
+        X500NameBuilder x500NameBld = new X500NameBuilder(BCStyle.INSTANCE)
+                .addRDN(BCStyle.CN, "Demo End-Entity Certificate")
+                .addRDN(BCStyle.C, "CN")
+                .addRDN(BCStyle.ST, "Shanghai")
+                .addRDN(BCStyle.L, "shanghai")
+                .addRDN(BCStyle.O, "Trustasia");
+
+        X500Name subject = x500NameBld.build();
+
+        JcaX509v3CertificateBuilder certBldr = new JcaX509v3CertificateBuilder(signerCert.getSubject(),
+                calculateSerialNumber(), calculateDate(0), calculateDate(24 * 31),
+                subject, certKey);
+
+        JcaX509ExtensionUtils extUtils = new JcaX509ExtensionUtils();
+        certBldr.addExtension(Extension.authorityKeyIdentifier, false, extUtils.createAuthorityKeyIdentifier(signerCert))
+                .addExtension(Extension.subjectKeyIdentifier, false, extUtils.createSubjectKeyIdentifier(certKey))
+                .addExtension(Extension.basicConstraints, true, new BasicConstraints(false))
+                .addExtension(Extension.keyUsage, true, new ExtendedKeyUsage(keyPurpose));
+
+        ContentSigner contentSigner = new JcaContentSignerBuilder(signAlg)
+                .setProvider(new BouncyCastleProvider())
+                .build(signerKey);
+
+        return certBldr.build(contentSigner);
+    }
+
+    /**
+     * The following example shows the construction of a simple attribute certificate that just includes a
+     * URI for a user’s role using the RoleSyntax defined in RFC 5755
+     * 创建 属性证书
+     *
+     * @param issuerCert
+     * @param issuerKey
+     * @param sigAlg
+     * @param holderCert
+     * @param holderRoleUri
+     * @return
+     * @throws OperatorCreationException
+     */
+    public static X509AttributeCertificateHolder createAttributeCertificate(X509CertificateHolder issuerCert,
+                                                                            PrivateKey issuerKey, String sigAlg,
+                                                                            X509CertificateHolder holderCert,
+                                                                            String holderRoleUri)
+            throws OperatorCreationException {
+
+        X509v2AttributeCertificateBuilder acBldr = new X509v2AttributeCertificateBuilder(
+                new AttributeCertificateHolder(holderCert),
+                new AttributeCertificateIssuer(issuerCert.getSubject()),
+                calculateSerialNumber(),
+                calculateDate(0),
+                calculateDate(24 * 31));
+
+        GeneralName generalName = new GeneralName(GeneralName.uniformResourceIdentifier, holderRoleUri);
+
+        acBldr.addAttribute(X509AttributeIdentifiers.id_at_role, new RoleSyntax(generalName));
+
+        ContentSigner contentSigner = new JcaContentSignerBuilder(sigAlg)
+                .setProvider(new BouncyCastleProvider())
+                .build(issuerKey);
+
+        return acBldr.build(contentSigner);
+
     }
 
 
